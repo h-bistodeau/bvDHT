@@ -3,10 +3,14 @@ from sys import argv
 from socket import *
 import threading
 
-# Application is launched through argv. Lack of arguments indicates this will be the server. If there are arguments, then we are
-# connecting to a peer. 
+Valid_commands = ["locate", "connect", "disconnect", "contains","get", "insert", "remove"]
+hashTable = {} # The all-powerful hash table for this project.
+running = True
 
-# Focusing on starting the server. 
+# Application is launched through argv. Lack of arguments indicates this will be the server. If there are arguments, then we are
+# connecting to a peer.
+
+# Focusing on starting the server.
 
 # Don't need a class for the finger table, just a dictionary. Key is whatever it is, value should be the peer address.
 def fingerTableSetup(self, startup = True):
@@ -23,25 +27,79 @@ def fingerTableSetup(self, startup = True):
 
     return table
 
+def handle_messages(socket):
+    global running
 
-# The all-powerful hash table for this project. 
-hashTable = {}
+    # while we are still connected to the DHT
+    while running:
+        try:
+            # recieve a message/command
+            msg = socket.recv(1024)
 
-# This is almost like a bag of holding, stuff can go in, but to pull it you you need to know what the value is. 
+            # disconnect if you haven't recieved one
+            if not msg:
+                print("Disconnected")
+                break
+
+            str_msg = msg.decode().strip() # added .strip() just in case
+            if str_msg in Valid_commands:
+                if str_msg == "locate":
+                    print("recieved locate command.... Now running locate")
+
+                elif str_msg == "contains":
+                    print("recieved contains command.... Now running contains")
+
+                elif str_msg == "get":
+                    print("recieved get command.... Now running get")
+
+                elif str_msg == "insert":
+                    print("recieved insert command.... Now running insert")
+
+                elif str_msg == "remove":
+                    print("recieved remove command.... Now running remove")
+
+                else:
+                    print("recieved unknown command, or data is being recieved elsewhere")
+        except Exception as e:
+            print('Error', e)
+            print("Disconnected")
+            running = False
+            break
 
 
 if __name__ == "__main__":
     sock = socket(AF_INET, SOCK_STREAM)
     sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     # If the length of argv is one (just the program), then we launch as the initial connection
+
     if len(argv) == 1:
         # server_start()
         sock.bind(('', 8008))
+        sock.listen(1)
+
+        #connetion to peer is initiated
+        conn, addr = sock.accept()
+        print("Connection by", addr)
+
         self = sock.getsockname()[0]
         hashTable = fingerTableSetup(hash(self), True)
         print(hashTable)
+
+        #create thread to handle incoming msg/commands
+        threading.Thread(target=handle_messages, args=(conn,), daemon=True).start()
+
     # Otherwise, we connect to a peer.
     elif len(argv) > 1:
         # connect_to_system()
         hashTable = fingerTableSetup(hash(argv[1]), False)
         print(hashTable)
+        threading.Thread(target=handle_messages, args=(sock,), daemon=True).start
+        
+    #super duper bare bones send commands loop (literally no cool features just the starting point)   
+    while running:
+        command = input("Enter command: ")
+        if command not in Valid_commands:
+            print("Invalid command")
+            pass
+        
+        sock.send(command.encode())
