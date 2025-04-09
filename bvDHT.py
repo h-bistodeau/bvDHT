@@ -58,8 +58,8 @@ def handle_messages(socket):
                 elif str_msg == "remove":
                     print("recieved remove command.... Now running remove")
 
-                else:
-                    print("recieved unknown command, or data is being recieved elsewhere")
+            else:
+                print("recieved unknown command, or data is being recieved elsewhere")
         except Exception as e:
             print('Error', e)
             print("Disconnected")
