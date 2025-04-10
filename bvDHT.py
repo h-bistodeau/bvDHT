@@ -39,6 +39,7 @@ running = True
 
 hashTable = {}
 
+# Our space in the system is determined by our distance between us and next.
 fingertable = {}
 # This is almost like a bag of holding, stuff can go in, but to pull it you you need to know what the value is. 
 
@@ -92,13 +93,13 @@ def contains(peer, key):
 
 def locate(peer, key):
     peer.send(("LOCATE\n").encode())
-    peer.send((f'{key}').encode())
+    peer.send((f'{key}\n').encode())
     address = getLine(peer)
     return address
 
 def connect(peer, address_key, finger_table):
     peer.send(("CONNECT\n").encode())
-    peer.send((f'{address_key}').encode())
+    peer.send((f'{address_key}\n').encode())
     num_entries = getLine(peer)
     while num_entries != 0:
         key = getLine(peer)
@@ -112,11 +113,27 @@ def connect(peer, address_key, finger_table):
     peer.send((f"{finger_table["self"]}\n").encode())
 
 
-def disconnect():
-    pass
-
-def update_prev():
-    pass
+def disconnect(peer, address_key):
+    peer.send(("DISCONNECT\n").encode())
+    peer.send((f'{address_key}\n').encode())
+    num_files = len(hashTable)
+    peer.send((f'{num_files}\n').encode())
+    for key in hashTable:
+        peer.send((f"{key}\n").encode())
+        peer.send((f"{len(hashTable[key])}").encode())
+        peer.send((f"{hashTable[key]}").encode())
+    ack = getLine(peer)
+    if ack == "0":
+        return False
+    return True 
+  
+def update_prev(next, self_key):
+    next.send(("UPDATE_PREV\n").encode())
+    next.send((f"{self_key}\n").encode())
+    ack = getLine(next)
+    if ack == '0':
+        return False
+    return True
 
 
 # Helper functions
