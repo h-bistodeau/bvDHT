@@ -2,6 +2,7 @@
 from sys import argv
 from socket import *
 import threading
+from time import sleep
 
 # Application is launched through argv. Lack of arguments indicates this will be the server. If there are arguments, then we are
 # connecting to a peer. 
@@ -179,42 +180,58 @@ def handle_messages(socket):
             running = False
             break
 
+def con(connection):
+    connection.send(("Connection established\n").encode())
+    msg = getLine(connection)
+    print(msg)
+
+def recv(conn):
+    msg = getLine(conn)
+    sleep(4)
+    conn.send(("Finished work\n").encode())
+    return
 
 
 if __name__ == "__main__":
-    sock = socket(AF_INET, SOCK_STREAM)
-    sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-    # If the length of argv is one (just the program), then we launch as the initial connection
+    # Server mode
     if len(argv) == 1:
-        # server_start()
+        sock = socket(AF_INET, SOCK_STREAM)
+        sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
         sock.bind(('', 8008))
-        # decided to use single thread and deal with deadlock for now. 
-        # If time allows, expand to multithreading.
-        sock.listen(1)
+        sock.listen(2)
 
-        #connetion to peer is initiated
-        conn, addr = sock.accept()
-        print("Connection by", addr)
 
-        self = sock.getsockname()[0]
-        fingertable = fingerTableSetup(hash(self), True)
-        print(fingertable)
- 
-        threading.Thread(target=handle_messages, args=(conn,), daemon=True).start()
+        print("Server is listening on port 8008...")
 
-    # Otherwise, we connect to a peer.
-    elif len(argv) > 1:
-        # connect_to_system()
-        fingertable = fingerTableSetup(hash(argv[1]), False)
-        print(fingertable)
+        try:
+            while True:
+                try:
+                    conn, addr = sock.accept()
+                    print("Connected by", addr)
+                    # One thread to handle connecting
+                    threading.Thread(target=con, args=(conn,), daemon=True).start()
+                except TimeoutError:
+                    continue
+        except KeyboardInterrupt:
+            print("\nKeyboard interrupt received. Shutting down server.")
 
-        threading.Thread(target=handle_messages, args=(sock,), daemon=True).start()
 
-        #super duper bare bones send commands loop (literally no cool features just the starting point)   
-    while running:
-        command = input("Enter command: ")
-        if command not in Valid_commands:
-            print("Invalid command")
-            pass
-        
-        sock.send(command.encode())
+    # Client mode
+    elif len(argv) == 3:
+        ip = argv[1]
+        port = int(argv[2])
+        sock = socket(AF_INET, SOCK_STREAM)
+
+        try:
+            sock.connect((ip, port))
+            print(f"Connected to {ip}:{port}")
+            # You can later replace this with DHT join logic or messaging
+            threading.Thread(target=recv, args=((ip,port),), daemon=True).start()
+        except Exception as e:
+            print(f"Failed to connect to {ip}:{port} - {e}")
+
+
+    else:
+        print("Usage:")
+        print("  python file.py              # Start new DHT server")
+        print("  python file.py <IP> <PORT>  # Join existing DHT at IP:PORT")
