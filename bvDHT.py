@@ -1,4 +1,5 @@
 # This is just some preliminary work for the DHT based on what we came up with/what I remember from class.
+import hashlib
 from sys import argv
 from socket import *
 import threading
@@ -187,13 +188,28 @@ def con(connection):
 
 def recv(conn):
     msg = getLine(conn)
+    print(msg)
     sleep(4)
     conn.send(("Finished work\n").encode())
     return
 
+def handle_input():
+    while True:
+        i = input("Enter a string: ")
+        print("This is your string: " + i)
+        print("This is the string hashed: " + str(int.from_bytes(hashlib.sha1(i.encode()).digest(), byteorder='big')))
+
+def socket_listener(sock):
+    while True:
+        try:
+            conn, addr = sock.accept()
+            print("Connected by", addr)
+            threading.Thread(target=con, args=(conn,), daemon=True).start()
+        except socket.timeout:
+            continue
+
 
 if __name__ == "__main__":
-    # Server mode
     if len(argv) == 1:
         sock = socket(AF_INET, SOCK_STREAM)
         sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
@@ -203,17 +219,20 @@ if __name__ == "__main__":
 
         print("Server is listening on port 8008...")
 
+        # Start socket listener thread
+        threading.Thread(target=socket_listener, args=(sock,), daemon=True).start()
+
+        # Start input thread
+        threading.Thread(target=handle_input, daemon=True).start()
+
+        # Keep main thread alive
         try:
             while True:
-                try:
-                    conn, addr = sock.accept()
-                    print("Connected by", addr)
-                    # One thread to handle connecting
-                    threading.Thread(target=con, args=(conn,), daemon=True).start()
-                except TimeoutError:
-                    continue
+                sleep(1)
         except KeyboardInterrupt:
             print("\nKeyboard interrupt received. Shutting down server.")
+            sock.close()
+
 
 
     # Client mode
@@ -226,7 +245,8 @@ if __name__ == "__main__":
             sock.connect((ip, port))
             print(f"Connected to {ip}:{port}")
             # You can later replace this with DHT join logic or messaging
-            threading.Thread(target=recv, args=((ip,port),), daemon=True).start()
+            recv(sock)
+
         except Exception as e:
             print(f"Failed to connect to {ip}:{port} - {e}")
 
