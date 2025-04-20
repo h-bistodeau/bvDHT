@@ -52,9 +52,6 @@ hashTable = {}
 # Our space in the system is determined by our distance between us and next.
 fingertable = {}
 
-
-# This is almost like a bag of holding, stuff can go in, but to pull it you you need to know what the value is.
-
 # Commands
 
 def get(peer, key):
@@ -68,7 +65,7 @@ def get(peer, key):
     return data
 
 
-def insert(peer, key):
+def insert(peer, key, value):
     peer.send(("INSERT\n").encode())
     peer.send((f"{key}\n").encode())
     ack = getLine(peer)
@@ -76,6 +73,7 @@ def insert(peer, key):
         return False
     peer.send((f"{len(key)}\n").encode())
     peer.send((f"{key}\n").encode())
+    peer.send((f"{value}\n").encode())
     ack = getLine(peer)
     if ack == "0":
         return False
@@ -180,15 +178,17 @@ def handle_messages(socket):
                     print("recieved contains command...")
                     key = getLine(socket)
                     # if you own the space or that key ack(1) if not ack(0)
-                    if hashTable[key] in hashTable:
+                    if key in hashTable.keys():
                         socket.send((f"1\n").encode())
+
+                        # if you have entry ack(1) if not ack(0)
+                        if hashTable[key] is not None:
+                            socket.send((f"1\n").encode())
+                        else:
+                            socket.send((f"0\n").encode())
+                    #if its not even in the space send both negative acknowledgments
                     else:
                         socket.send((f"0\n").encode())
-
-                    #if you have entry ack(1) if not ack(0)
-                    if hashTable[key] not None:
-                        socket.send((f"1\n").encode())
-                    else:
                         socket.send((f"0\n").encode())
 
                 elif str_msg == "GET":
@@ -196,7 +196,7 @@ def handle_messages(socket):
                     key = getLine(socket)
 
                     # acknowledge ownership of the hashed space
-                    if hashTable[key] in hashTable:
+                    if key in hashTable.keys():
                         socket.send((f"1\n").encode())
                     else:
                         socket.send((f"0\n").encode())
@@ -210,14 +210,45 @@ def handle_messages(socket):
                     socket.send((f"{hashTable[key]}").encode())
 
                 elif str_msg == "INSERT":
-                    print("recieved insert command.... Now running insert")
+                    print("recieved insert command...")
+                    key = getLine(socket)
+
+                    # ack if the key is owned by you
+                    if key in hashTable.keys():
+                        socket.send((f"1\n").encode())
+
+                        try:
+                            # try to recieve all the proper data to insert and acknowledge
+                            len_key = getLine(socket)
+                            key = getLine(socket)
+                            data = socket.recv(len_key.decode())
+                            hashTable[key] = data
+                            socket.send((f"1\n").encode())
+                        except KeyError:
+                            socket.send((f"0\n").encode())
+                    else:
+                        socket.send((f"0\n").encode())
 
                 elif str_msg == "REMOVE":
-                    print("recieved remove command.... Now running remove")
+                    print("recieved remove command...")
+                    key = getLine(socket)
+
+                    #if the key is within our table (we own it) thn remove it
+                    if key in hashTable.keys():
+                        hashTable.pop(key)
+                        socket.send((f"1\n").encode())
+                    else:
+                        socket.send((f"0\n").encode())
 
                 elif str_msg == "UPDATE_PREV":
-                    print("received update_prev command... now running update_prev")
-
+                    print("received update_prev command...")
+                    #try to recieve the peer's key and set it within your fingertable
+                    try:
+                        key = getLine(socket)
+                        fingertable["prev"] = key
+                        socket.send((f"1\n").encode())
+                    except KeyError:
+                        socket.send((f"0\n").encode())
             else:
                 print("recieved unknown command, or data is being recieved elsewhere")
         except Exception as e:
