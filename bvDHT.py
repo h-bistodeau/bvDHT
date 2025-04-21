@@ -1,4 +1,3 @@
-# This is just some preliminary work for the DHT based on what we came up with/what I remember from class.
 import hashlib
 from sys import argv
 from socket import *
@@ -6,25 +5,33 @@ import threading
 from time import sleep
 
 # Application is launched through argv. Lack of arguments indicates this will be the server. If there are arguments, then we are
-# connecting to a peer. 
+# connecting to a peer.
 
-# Focusing on starting the server. 
+
+# Backmans getHashIndex function------
+# Returns an integer index into the hash-space for a node Address
+#  - addr is of the form ("ipAddress or hostname", portNumber)
+#    where the first item is a string and the second is an integer
+def getHashIndex(addr):
+    b_addrStr = ("%s:%d" % addr).encode()
+    return int.from_bytes(hashlib.sha1(b_addrStr).digest(), byteorder="big")
 
 # Don't need a class for the finger table, just a dictionary. Key is whatever it is, value should be the peer address.
-def fingerTableSetup(self, startup = True):
+def fingerTableSetup(self, startup=True):
     table = {}
     if startup:
-        for i in range(1,5):
+        for i in range(1, 5):
             table[f"finger{i}"] = self
         table["next"] = self
         table["prev"] = self
     else:
-        for i in range(1,5):
-            # this will have to iterate through who's in the data space. 
+        for i in range(1, 5):
+            # this will have to iterate through who's in the data space.
             table[f"finger{i}"] = "Test"
     table["self"] = self
 
     return table
+
 
 def getLine(conn):
     msg = b''
@@ -35,18 +42,18 @@ def getLine(conn):
             break
     return msg.decode()
 
-# The all-powerful hash table for this project. 
-Valid_commands = ["LOCATE", "CONNECT", "DISCONNECT", "CONTAINS","GET", "INSERT", "REMOVE", "UPDATE_PREV"]
+
+# The all-powerful hash table for this project.
+Valid_commands = ["LOCATE", "CONNECT", "DISCONNECT", "CONTAINS", "GET", "INSERT", "REMOVE", "UPDATE_PREV"]
 running = True
 
 hashTable = {}
 
 # Our space in the system is determined by our distance between us and next.
 fingertable = {}
-# This is almost like a bag of holding, stuff can go in, but to pull it you you need to know what the value is. 
 
 # Commands
- 
+
 def get(peer, key):
     peer.send(("GET\n").encode())
     peer.send((f"{key}\n").encode())
@@ -58,7 +65,7 @@ def get(peer, key):
     return data
 
 
-def insert(peer, key):
+def insert(peer, key, value):
     peer.send(("INSERT\n").encode())
     peer.send((f"{key}\n").encode())
     ack = getLine(peer)
@@ -66,10 +73,12 @@ def insert(peer, key):
         return False
     peer.send((f"{len(key)}\n").encode())
     peer.send((f"{key}\n").encode())
+    peer.send((f"{value}\n").encode())
     ack = getLine(peer)
     if ack == "0":
         return False
     return True
+
 
 def remove(peer, key):
     peer.send(("REMOVE\n"))
@@ -82,6 +91,7 @@ def remove(peer, key):
         return False
     return True
 
+
 def contains(peer, key):
     peer.send(("CONTAINS\n"))
     peer.send((f"{key}\n").encode())
@@ -93,26 +103,28 @@ def contains(peer, key):
         return False
     return True
 
+
 def locate(peer, key):
     peer.send(("LOCATE\n").encode())
     peer.send((f'{key}\n').encode())
     address = getLine(peer)
     return address
 
+
 def connect(peer, address_key, finger_table):
     peer.send(("CONNECT\n").encode())
     peer.send((f'{address_key}\n').encode())
-    num_entries = getLine(peer)
+    num_entries = int(getLine(peer))
     while num_entries != 0:
         key = getLine(peer)
-        length = int(getLine(peer))
+        #length = int(getLine(peer))
         value = getLine(peer)
         hashTable[key] = value
         num_entries -= 1
     next_peer = getLine(peer)
     finger_table["next"] = next_peer
     update_prev(peer, next_peer)
-    peer.send((f"{finger_table["self"]}\n").encode())
+    peer.send((f"{finger_table['self']}\n").encode())
 
 
 def disconnect(peer, address_key):
@@ -127,8 +139,9 @@ def disconnect(peer, address_key):
     ack = getLine(peer)
     if ack == "0":
         return False
-    return True 
-  
+    return True
+
+
 def update_prev(next, self_key):
     next.send(("UPDATE_PREV\n").encode())
     next.send((f"{self_key}\n").encode())
@@ -146,33 +159,99 @@ def handle_messages(socket):
     while running:
         try:
             # recieve a message/command
-            msg = getLine(socket)
+            print("Enter Command: ")
+            str_msg = getLine(socket).strip()
 
             # disconnect if you haven't recieved one
-            if not msg:
+            if not str_msg:
                 print("Disconnected")
                 break
-
-            str_msg = msg.strip() # added .strip() just in case
             if str_msg in Valid_commands:
                 if str_msg == "LOCATE":
-                    print("recieved locate command.... Now running locate")
+                    print("recieved locate command...")
+                    key = getLine(socket)
+
+                    #call your own locate in order to send your closest peer
+                    address = locate(socket, key)
+                    socket.send((f"{address}\n").encode())
 
                 elif str_msg == "CONTAINS":
-                    print("recieved contains command.... Now running contains")
+                    print("recieved contains command...")
+                    key = getLine(socket)
+                    # if you own the space or that key ack(1) if not ack(0)
+                    if key in hashTable.keys():
+                        socket.send((f"1\n").encode())
+
+                        # if you have entry ack(1) if not ack(0)
+                        if hashTable[key] is not None:
+                            socket.send((f"1\n").encode())
+                        else:
+                            socket.send((f"0\n").encode())
+                    #if its not even in the space send both negative acknowledgments
+                    else:
+                        socket.send((f"0\n").encode())
+                        socket.send((f"0\n").encode())
 
                 elif str_msg == "GET":
-                    print("recieved get command.... Now running get")
+                    print("recieved get command...")
+                    key = getLine(socket)
+
+                    # acknowledge ownership of the hashed space
+                    if key in hashTable.keys():
+                        socket.send((f"1\n").encode())
+                    else:
+                        socket.send((f"0\n").encode())
+                    # try to get the length of the value at the key, but it might be zero throwing an error.
+                    try:
+                        length = len(hashTable[key])
+                    except KeyError:
+                        length = 0
+
+                    socket.send((f"{length}\n").encode())
+                    socket.send((f"{hashTable[key]}").encode())
 
                 elif str_msg == "INSERT":
-                    print("recieved insert command.... Now running insert")
+                    print("recieved insert command...")
+                    key = getLine(socket)
+
+                    # ack if the key is owned by you
+                    if key in hashTable.keys():
+                        socket.send((f"1\n").encode())
+
+                        try:
+                            # try to recieve all the proper data to insert and acknowledge
+                            len_key = getLine(socket)
+                            key = getLine(socket)
+                            data = socket.recv(len_key.decode())
+                            hashTable[key] = data
+                            socket.send((f"1\n").encode())
+                        except KeyError:
+                            socket.send((f"0\n").encode())
+                    else:
+                        socket.send((f"0\n").encode())
 
                 elif str_msg == "REMOVE":
-                    print("recieved remove command.... Now running remove")
-                
-                elif str_msg == "UPDATE_PREV":
-                    print("received update_prev command... now running update_prev")
+                    print("recieved remove command...")
+                    key = getLine(socket)
 
+                    #if the key is within our table (we own it) thn remove it
+                    if key in hashTable.keys():
+                        hashTable.pop(key)
+                        socket.send((f"1\n").encode())
+                    else:
+                        socket.send((f"0\n").encode())
+
+                elif str_msg == "UPDATE_PREV":
+                    print("received update_prev command...")
+                    #try to recieve the peer's key and set it within your fingertable
+                    try:
+                        key = getLine(socket)
+                        fingertable["prev"] = key
+                        socket.send((f"1\n").encode())
+                    except KeyError:
+                        socket.send((f"0\n").encode())
+                elif str_msg == "exit":
+                    return
             else:
                 print("recieved unknown command, or data is being recieved elsewhere")
         except Exception as e:
@@ -181,10 +260,13 @@ def handle_messages(socket):
             running = False
             break
 
+
+
 def con(connection):
     connection.send(("Connection established\n").encode())
     msg = getLine(connection)
     print(msg)
+
 
 def recv(conn):
     msg = getLine(conn)
@@ -193,62 +275,112 @@ def recv(conn):
     conn.send(("Finished work\n").encode())
     return
 
-def handle_input():
+
+def handle_input(sock):
     while True:
         i = input("Enter a string: ")
         print("This is your string: " + i)
-        print("This is the string hashed: " + str(int.from_bytes(hashlib.sha1(i.encode()).digest(), byteorder='big')))
+        hashed = int.from_bytes(hashlib.sha1(i.encode()).digest(), byteorder='big')
+        print("This is the string hashed:", hashed)
+        sock.send(f"{hashed}\n".encode())
+
+
 
 def socket_listener(sock):
     while True:
         try:
-            conn, addr = sock.accept()
-            print("Connected by", addr)
-            threading.Thread(target=con, args=(conn,), daemon=True).start()
+            command = getLine(sock)
+            print("[RECEIVED]:", command)
         except socket.timeout:
             continue
 
 
+
 if __name__ == "__main__":
     if len(argv) == 1:
+                # Step 1: CONNECT to existing peer
+        
         sock = socket(AF_INET, SOCK_STREAM)
-        sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        sock.bind(('', 8008))
-        sock.listen(2)
 
+        server_sock = socket(AF_INET, SOCK_STREAM)
+        server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        server_sock.bind(('', 8008)) 
+        server_sock.listen(2)
+        print("Now listening on port 8008 for new peers...")
+        
+        try:
+            client_sock = socket(AF_INET, SOCK_STREAM)
+            client_sock.connect(('', 8008))
+            client_sock.send(("Connected to self\n").encode())
+            
+    
+            # Optional: start handler for that connection
+            threading.Thread(target=socket_listener, args=(client_sock,), daemon=True).start()
+            threading.Thread(target=handle_input, args=(client_sock,), daemon=True).start()
+    
+        except Exception as e:
+            print(f"Failed to connect to DHT peer: {e}")
+            exit(1)
 
-        print("Server is listening on port 8008...")
-
-        # Start socket listener thread
-        threading.Thread(target=socket_listener, args=(sock,), daemon=True).start()
-
-        # Start input thread
-        threading.Thread(target=handle_input, daemon=True).start()
-
-        # Keep main thread alive
+    
+        def accept_loop():
+            while True:
+                conn, addr = server_sock.accept()
+                print(f"Accepted connection from {addr}")
+                threading.Thread(target=socket_listener, args=(conn,), daemon=True).start()
+                threading.Thread(target=handle_input, args=(conn,), daemon=True).start()
+    
+        threading.Thread(target=accept_loop, daemon=True).start()
+    
         try:
             while True:
                 sleep(1)
         except KeyboardInterrupt:
-            print("\nKeyboard interrupt received. Shutting down server.")
-            sock.close()
+            print("\nKeyboard interrupt received. Shutting down.")
+            server_sock.close()
 
-
-
-    # Client mode
     elif len(argv) == 3:
-        ip = argv[1]
-        port = int(argv[2])
-        sock = socket(AF_INET, SOCK_STREAM)
-
+        peer_ip = argv[1]
+        peer_port = int(argv[2])
+    
+        # Step 1: CONNECT to existing peer
         try:
-            sock.connect((ip, port))
-            print(f"Connected to {ip}:{port}")
-            # You can later replace this with DHT join logic or messaging
-            recv(sock)
-
+            client_sock = socket(AF_INET, SOCK_STREAM)
+            client_sock.connect((peer_ip, peer_port))
+            client_sock.send(("Connected to you\n").encode())
+            print(f"Connected to DHT peer at {peer_ip}:{peer_port}")
+    
+            # Optional: start handler for that connection
+            threading.Thread(target=socket_listener, args=(client_sock,), daemon=True).start()
+            threading.Thread(target=handle_input, args=(client_sock,), daemon=True).start()
+    
         except Exception as e:
-            print(f"Failed to connect to {ip}:{port} - {e}")
+            print(f"Failed to connect to DHT peer: {e}")
+            exit(1)
+    
+        # Step 2: Start SERVER to accept new peers
+        server_sock = socket(AF_INET, SOCK_STREAM)
+        server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        server_sock.bind(('', 8008))  # or use a different port if needed
+        server_sock.listen(2)
+        print("Now listening on port 8008 for new peers...")
+    
+        def accept_loop():
+            while True:
+                conn, addr = server_sock.accept()
+                print(f"Accepted connection from {addr}")
+                threading.Thread(target=socket_listener, args=(conn,), daemon=True).start()
+                threading.Thread(target=handle_input, args=(conn,), daemon=True).start()
+    
+        threading.Thread(target=accept_loop, daemon=True).start()
+    
+        try:
+            while True:
+                sleep(1)
+        except KeyboardInterrupt:
+            print("\nKeyboard interrupt received. Shutting down.")
+            server_sock.close()
+
 
 
     else:
