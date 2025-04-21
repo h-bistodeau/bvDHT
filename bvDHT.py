@@ -54,18 +54,19 @@ fingertable = {}
 
 # Commands
 
-def get(peer, key):
+def send_get(peer, key):
     peer.send(("GET\n").encode())
     peer.send((f"{key}\n").encode())
     ack = getLine(peer)
-    length = int(getLine(peer))
-    data = getLine(peer)
     if ack == "0":
         return "NULL"
+    length = int(getLine(peer))
+    data = getLine(peer)
+
     return data
 
 
-def insert(peer, key, value):
+def send_insert(peer, key, value):
     peer.send(("INSERT\n").encode())
     peer.send((f"{key}\n").encode())
     ack = getLine(peer)
@@ -80,7 +81,7 @@ def insert(peer, key, value):
     return True
 
 
-def remove(peer, key):
+def send_remove(peer, key):
     peer.send(("REMOVE\n"))
     peer.send((f"{key}\n").encode())
     ack = getLine(peer)
@@ -92,7 +93,7 @@ def remove(peer, key):
     return True
 
 
-def contains(peer, key):
+def send_contains(peer, key):
     peer.send(("CONTAINS\n"))
     peer.send((f"{key}\n").encode())
     ack = getLine(peer)
@@ -104,14 +105,14 @@ def contains(peer, key):
     return True
 
 
-def locate(peer, key):
+def send_locate(peer, key):
     peer.send(("LOCATE\n").encode())
     peer.send((f'{key}\n').encode())
     address = getLine(peer)
     return address
 
 
-def connect(peer, address_key, finger_table):
+def send_connect(peer, address_key, finger_table):
     peer.send(("CONNECT\n").encode())
     peer.send((f'{address_key}\n').encode())
     num_entries = int(getLine(peer))
@@ -123,11 +124,11 @@ def connect(peer, address_key, finger_table):
         num_entries -= 1
     next_peer = getLine(peer)
     finger_table["next"] = next_peer
-    update_prev(peer, next_peer)
+    send_update_prev(peer, next_peer)
     peer.send((f"{finger_table['self']}\n").encode())
 
 
-def disconnect(peer, address_key):
+def send_disconnect(peer, address_key):
     peer.send(("DISCONNECT\n").encode())
     peer.send((f'{address_key}\n').encode())
     num_files = len(hashTable)
@@ -142,7 +143,7 @@ def disconnect(peer, address_key):
     return True
 
 
-def update_prev(next, self_key):
+def send_update_prev(next, self_key):
     next.send(("UPDATE_PREV\n").encode())
     next.send((f"{self_key}\n").encode())
     ack = getLine(next)
@@ -150,6 +151,19 @@ def update_prev(next, self_key):
         return False
     return True
 
+
+def recv_get(peer):
+    key = getLine(peer)
+    ack = '1'
+    if key not in hashTable.keys():
+        ack = '0'
+        return
+    peer.send((ack+"\n").encode())
+    length = str(int(hashTable[key]))
+    peer.send((length + "\n").encode())
+    data = hashTable[key]
+    peer.send((key + "\n").encode())
+    return data
 
 # Helper functions
 def handle_messages(socket):
