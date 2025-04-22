@@ -8,17 +8,15 @@ from time import sleep
 # Application is launched through argv. Lack of arguments indicates this will be the server. If there are arguments, then we are
 # connecting to a peer.
 
-
-# Backmans getHashIndex function------
-# Returns an integer index into the hash-space for a node Address
-#  - addr is of the form ("ipAddress or hostname", portNumber)
-#    where the first item is a string and the second is an integer
-def getHashIndex(addr):
-    b_addrStr = ("%s:%d" % addr).encode()
-    return int.from_bytes(hashlib.sha1(b_addrStr).digest(), byteorder="big")
-
+# The all-powerful hash table for this project.
+Valid_commands = ["LOCATE", "CONNECT", "DISCONNECT", "CONTAINS", "GET", "INSERT", "REMOVE", "UPDATE_PREV"]
+running = True
+hashTable = {}
+fingertable = {}
 
 # Don't need a class for the finger table, just a dictionary. Key is whatever it is, value should be the peer address.
+
+#------------------- Finger table functionality----------------------
 def fingerTableSetup(self, startup=True):
     table = {}
     if startup:
@@ -34,6 +32,22 @@ def fingerTableSetup(self, startup=True):
 
     return table
 
+def updateFingerTable(self):
+    pass
+
+def send_peerInfo():
+    pass
+
+def receive_peerInfo():
+    pass
+
+#--------------------Helper Functions-----------------------
+# Returns an integer index into the hash-space for a node Address
+#  - addr is of the form ("ipAddress or hostname", portNumber)
+#    where the first item is a string and the second is an integer
+def getHashIndex(addr):
+    b_addrStr = ("%s:%d" % addr).encode()
+    return int.from_bytes(hashlib.sha1(b_addrStr).digest(), byteorder="big")
 
 def getLine(conn):
     msg = b''
@@ -44,19 +58,13 @@ def getLine(conn):
             break
     return msg.decode()
 
+def accept_loop():
+    while True:
+        conn, addr = server_sock.accept()
+        print(f"Accepted connection from {addr}")
+        threading.Thread(target=handle_messages, args=(conn,), daemon=True).start()
 
-# The all-powerful hash table for this project.
-Valid_commands = ["LOCATE", "CONNECT", "DISCONNECT", "CONTAINS", "GET", "INSERT", "REMOVE", "UPDATE_PREV"]
-running = True
-
-hashTable = {}
-
-# Our space in the system is determined by our distance between us and next.
-fingertable = {}
-
-
-# Commands
-
+# ----------------------- Sent Out functionality ---------------------- 
 def send_get(peer, key):
     peer.send(("GET\n").encode())
     peer.send((f"{key}\n").encode())
@@ -154,7 +162,7 @@ def send_update_prev(next, self_key):
         return False
     return True
 
-
+# --------------------------Receive Incoming Functionality-------------------------
 def recv_get(conn):
     key = getLine(conn)
 
@@ -176,7 +184,7 @@ def recv_get(conn):
 def recv_locate(conn):
     key = getLine(conn)
     # change this to iterate through the fingers with their keys
-    valid_fingers = ['finger 1', 'finger 2', 'finger 3', 'finger 4']
+    valid_fingers = ['finger1', 'finger2', 'finger3', 'finger4']
     for finger in valid_fingers:
         if finger in hashTable.keys():
             f_addr = fingertable[finger]
@@ -212,7 +220,7 @@ def recv_insert(conn):
         try:
             # try to recieve all the proper data to insert and acknowledge
             len_key = getLine(conn)
-            key = getLine(socket)
+            key = getLine(conn)
             data = conn.recv(len_key.decode())
             hashTable[key] = data
             conn.send((f"1\n").encode())
@@ -273,7 +281,7 @@ def recv_update_prev(conn):
         conn.send((f"0\n").encode())
 
 
-# Helper functions
+# One of the main functionality pieces, it takes in a string and runs the corresponding function to whatever command was given
 def handle_messages(socket):
     global running
 
@@ -325,22 +333,19 @@ def handle_messages(socket):
             print("Disconnected")
             running = False
             break
-def accept_loop():
-    while True:
-        conn, addr = server_sock.accept()
-        print(f"Accepted connection from {addr}")
-        threading.Thread(target=handle_messages, args=(conn,), daemon=True).start()
 
 
 if __name__ == "__main__":
+    # we are starting a brand new DHT since there are no arguments for the peer IP/Port
     if len(argv) == 1:
-        # Step 1: CONNECT to existing peer
 
+        #main connection information  set up to be the first user
         sock = socket(AF_INET, SOCK_STREAM)
-
         server_sock = socket(AF_INET, SOCK_STREAM)
         server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
         server_sock.bind(('', 8008))
+        #set up your finger table
+        fingerTableSetup(startup=True)
         server_sock.listen(5)
         print("Now listening on port 8008 for new peers...")
 
@@ -365,14 +370,16 @@ if __name__ == "__main__":
             print("\nKeyboard interrupt received. Shutting down.")
             server_sock.close()
 
+    # this means we are connectiong to another peer already within the DHT
     elif len(argv) == 3:
         peer_ip = argv[1]
         peer_port = int(argv[2])
 
-        # Step 1: CONNECT to existing peer
         try:
             client_sock = socket(AF_INET, SOCK_STREAM)
             client_sock.connect((peer_ip, peer_port))
+
+            fingerTableSetup(startup=False)
             client_sock.send(("Connected to you\n").encode())
             print(f"Connected to DHT peer at {peer_ip}:{peer_port}")
 
@@ -389,14 +396,6 @@ if __name__ == "__main__":
         server_sock.bind(('', 8008))  # or use a different port if needed
         server_sock.listen(2)
         print("Now listening on port 8008 for new peers...")
-
-
-        def accept_loop():
-            while True:
-                conn, addr = server_sock.accept()
-                print(f"Accepted connection from {addr}")
-                threading.Thread(target=handle_messages, args=(conn,), daemon=True).start()
-
 
         threading.Thread(target=accept_loop, daemon=True).start()
 
