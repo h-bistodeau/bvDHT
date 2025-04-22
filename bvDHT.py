@@ -325,23 +325,11 @@ def handle_messages(socket):
             print("Disconnected")
             running = False
             break
-
-def handle_input(sock):
+def accept_loop():
     while True:
-        i = input("Enter a string: ")
-        print("This is your string: " + i)
-        hashed = int.from_bytes(hashlib.sha1(i.encode()).digest(), byteorder='big')
-        print("This is the string hashed:", hashed)
-        sock.send(f"{hashed}\n".encode())
-
-
-def socket_listener(sock):
-    while True:
-        try:
-            command = getLine(sock)
-            print("[RECEIVED]:", command)
-        except socket.timeout:
-            continue
+        conn, addr = server_sock.accept()
+        print(f"Accepted connection from {addr}")
+        threading.Thread(target=handle_messages, args=(conn,), daemon=True).start()
 
 
 if __name__ == "__main__":
@@ -353,7 +341,7 @@ if __name__ == "__main__":
         server_sock = socket(AF_INET, SOCK_STREAM)
         server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
         server_sock.bind(('', 8008))
-        server_sock.listen(2)
+        server_sock.listen(5)
         print("Now listening on port 8008 for new peers...")
 
         try:
@@ -362,21 +350,11 @@ if __name__ == "__main__":
             client_sock.send(("Connected to self\n").encode())
 
             # Optional: start handler for that connection
-            threading.Thread(target=socket_listener, args=(client_sock,), daemon=True).start()
-            threading.Thread(target=handle_input, args=(client_sock,), daemon=True).start()
+            threading.Thread(target=handle_messages, args=(client_sock,), daemon=True).start()
 
         except Exception as e:
             print(f"Failed to connect to DHT peer: {e}")
             exit(1)
-
-
-        def accept_loop():
-            while True:
-                conn, addr = server_sock.accept()
-                print(f"Accepted connection from {addr}")
-                threading.Thread(target=socket_listener, args=(conn,), daemon=True).start()
-                threading.Thread(target=handle_input, args=(conn,), daemon=True).start()
-
 
         threading.Thread(target=accept_loop, daemon=True).start()
 
@@ -399,8 +377,7 @@ if __name__ == "__main__":
             print(f"Connected to DHT peer at {peer_ip}:{peer_port}")
 
             # Optional: start handler for that connection
-            threading.Thread(target=socket_listener, args=(client_sock,), daemon=True).start()
-            threading.Thread(target=handle_input, args=(client_sock,), daemon=True).start()
+            threading.Thread(target=handle_messages, args=(client_sock,), daemon=True).start()
 
         except Exception as e:
             print(f"Failed to connect to DHT peer: {e}")
@@ -418,8 +395,7 @@ if __name__ == "__main__":
             while True:
                 conn, addr = server_sock.accept()
                 print(f"Accepted connection from {addr}")
-                threading.Thread(target=socket_listener, args=(conn,), daemon=True).start()
-                threading.Thread(target=handle_input, args=(conn,), daemon=True).start()
+                threading.Thread(target=handle_messages, args=(conn,), daemon=True).start()
 
 
         threading.Thread(target=accept_loop, daemon=True).start()
@@ -430,13 +406,6 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("\nKeyboard interrupt received. Shutting down.")
             server_sock.close()
-
-
-
-    else:
-        print("Usage:")
-        print("  python file.py              # Start new DHT server")
-        print("  python file.py <IP> <PORT>  # Join existing DHT at IP:PORT")
 
 
     else:
