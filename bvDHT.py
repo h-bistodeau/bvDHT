@@ -165,6 +165,46 @@ def recv_get(peer):
     peer.send((key + "\n").encode())
     return data
 
+def recv_locate(peer):
+    key = getLine(peer)
+    for finger in fingertable:
+        address = send_locate(peer, key)
+    peer.send((str(address)+"\n").encode())
+
+def recv_connect(peer):
+    key = getLine(peer)
+    peer.send(("1\n").encode())
+    # need to check which ones to send. More on that later...
+    for entry in hashTable:
+        #check if meets criterea here
+        peer.send((str(entry)+"\n").encode())
+        peer.send((str(len(hashTable[entry])) + "\n").encode())
+        peer.send((str(hashTable[entry]) + "\n").encode())
+    peer.send((str(fingertable["next"]) + "\n").encode())
+    new_friend = getLine(peer)
+    # add to finger table here... somehow. 
+
+def recv_disconnect(peer):
+    next_key = getLine(peer)
+    num_entries = int(getLine(peer))
+    while num_entries != 0:
+        key = getLine(peer)
+        length = int(getLine(peer))
+        data = getLine(peer)
+        # Shove these into the hash table. working on that. 
+    updated = send_update_prev(fingertable["next"])
+    if updated:
+        peer.send(("1\n").encode())
+        return
+    peer.send(("0\n").encode())
+    return
+
+def recv_update_prev(peer):
+    address = getLine(peer)
+    fingertable["prev"] = address
+    peer.send(("1\n").encode())
+    
+        
 # Helper functions
 def handle_messages(socket):
     global running
@@ -186,7 +226,7 @@ def handle_messages(socket):
                     key = getLine(socket)
 
                     #call your own locate in order to send your closest peer
-                    address = locate(socket, key)
+                    address = send_locate(socket, key)
                     socket.send((f"{address}\n").encode())
 
                 elif str_msg == "CONTAINS":
