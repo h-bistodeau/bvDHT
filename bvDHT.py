@@ -179,9 +179,7 @@ def send_disconnect(peer, address_key):
         peer.send((f"{len(hashTable[key])}").encode())
         peer.send((f"{hashTable[key]}").encode())
     ack = getLine(peer)
-    if ack == "0":
-        return False
-    return True
+    return
 
 
 def send_update_prev(next, self_key):
@@ -364,6 +362,26 @@ def handle_messages(socket):
             running = False
             break
 
+def handle_input():
+    user_in = input("Enter Command > ").strip().upper()
+    words = user_in.split(" ")
+    command = words[0]
+    if command not in Valid_commands:
+        # Don't know how to handle this yet. 
+        return "ERROR"
+    match command:
+        case "DISCONNECT":
+            print("Received disconnect command")
+            ip, port = fingertable["prev"].decode().strip().split(":")
+            with socket(AF_INET, SOCK_STREAM) as conn:
+                conn.connect(ip, port)
+                send_disconnect(conn, fingertable["self"])
+            return
+        
+        case "GET":
+            pass
+
+
 
 if __name__ == "__main__":
     # we are starting a brand new DHT since there are no arguments for the peer IP/Port
@@ -441,3 +459,5 @@ if __name__ == "__main__":
         print("Usage:")
         print("  python file.py              # Start new DHT server")
         print("  python file.py <IP> <PORT>  # Join existing DHT at IP:PORT")
+
+        
