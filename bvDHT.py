@@ -16,7 +16,7 @@ fingertable = {}
 
 # local functions
 
-# determine if we have the key to begin with.
+# determine if we have the key to begin with.chatgpt
 def local_locate(key):
     if key in hashTable.keys():
         return '1'
@@ -58,8 +58,10 @@ def fingerTableSetup(self, startup=True):
         table["prev"] = self
     else:
         for i in range(1, 5):
-            # this will have to iterate through who's in the data space.
-            table[f"finger{i}"] = "Test"
+            # this will have to iterate through who's in the data space but can start as none
+            table[f"finger{i}"] = ("None")
+        table["next"] = None
+        table["prev"] = None
     table["self"] = self
 
     return table
@@ -362,98 +364,112 @@ def handle_messages(socket):
 
 def handle_input():
     user_in = input("Enter Command > ").strip().upper()
-    words = user_in.split(" ")
+    words = user_in.split(" ",1)
     command = words[0]
     if command not in Valid_commands:
-        # Don't know how to handle this yet.
-        return "ERROR"
-    match command:
-        case "DISCONNECT":
-            print("Received disconnect command")
-            ip, port = fingertable["prev"].decode().strip().split(":")
-            with socket(AF_INET, SOCK_STREAM) as conn:
-                conn.connect(ip, port)
-                _disconnect(conn, False, fingertable["self"])
+        print("invalid command was entered please enter a correct one")
+        print("Valid Commands are: DISCONNECT, LOCATE, INSERT, REMOVE, UPDATE_PREV")
+        return
+    if command == "DISCONNECT":
+        print("Received disconnect command")
+        ip, port = fingertable["prev"].decode().strip().split(":")
+        with socket(AF_INET, SOCK_STREAM) as conn:
+            conn.connect(ip, port)
+            _disconnect(conn, False, fingertable["self"])
             return
-
-        case "GET":
-            pass
+    elif command == "LOCATE":
+        if len(words) == 2:
+            print("Received Locate command")
+            locate(socket, False, words[1]) # calls locate function on the sending side with the key givec
+        else:
+            print('invalid syntax. correct syntax is LOCATE <key>')
+            return
+    elif command == "INSERT":
+        if len(words) == 2:
+            print("Received Insert command")
+            insert(socket, False, words[1])
+        else:
+            print('invalid syntax. correct syntax is INSERT <key>')
+            return
+    elif command == "REMOVE":
+        if len(words) == 2:
+            print("Received Remove command")
+            remove(socket, False, words[1])
+        else:
+            print('invalid syntax. correct syntax is REMOVE <key>')
+    elif command == "CONTAINS":
+        if len(words) == 2:
+            print("Received Contains command")
+            contains(socket, False, words[1])
+        else:
+            print('invalid syntax. correct syntax is CONTAINS <key>')
+    elif command == "GET":
+        if len(words) == 2:
+            print("Received Get command")
+            get(socket, False, words[1])
+        else:
+            print('invalid syntax. correct syntax is GET <key>')
+    elif command == "UPDATE_PREV":
+        if len(words) == 2:
+            print("Received Update Prev command")
+            update_prev(socket, False, words[1])
+        else:
+            print('invalid syntax. correct syntax is UPDATE_PREV <self_key>')
 
 
 if __name__ == "__main__":
     # we are starting a brand new DHT since there are no arguments for the peer IP/Port
     if len(argv) == 1:
-
-        # main connection information  set up to be the first user
-        sock = socket(AF_INET, SOCK_STREAM)
         server_sock = socket(AF_INET, SOCK_STREAM)
         server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
         server_sock.bind(('', 8008))
-        # set up your finger table
-        fingertable = fingertable(startup=True)
         server_sock.listen(5)
+        fingertable = fingertable(startup=True)
         print("Now listening on port 8008 for new peers...")
-
-        try:
-            client_sock = socket(AF_INET, SOCK_STREAM)
-            client_sock.connect(('', 8008))
-            client_sock.send(("Connected to self\n").encode())
-
-            # Optional: start handler for that connection
-            threading.Thread(target=handle_messages, args=(client_sock,), daemon=True).start()
-
-        except Exception as e:
-            print(f"Failed to connect to DHT peer: {e}")
-            exit(1)
 
         threading.Thread(target=accept_loop, daemon=True).start()
 
         try:
-            while True:
-                sleep(1)
+            while running:
+                handle_input()
         except KeyboardInterrupt:
-            print("\nKeyboard interrupt received. Shutting down.")
+            print("\nShutting down.")
             server_sock.close()
 
-    # this means we are connectiong to another peer already within the DHT
-    elif len(argv) == 3:
+    elif len(argv) >= 3:
         peer_ip = argv[1]
         peer_port = int(argv[2])
+        my_port = int(argv[3]) if len(argv) > 3 else 8008
 
         try:
             client_sock = socket(AF_INET, SOCK_STREAM)
             client_sock.connect((peer_ip, peer_port))
-
             fingerTableSetup(startup=False)
             client_sock.send(("Connected to you\n").encode())
-            print(f"Connected to DHT peer at {peer_ip}:{peer_port}")
-
-            # Optional: start handler for that connection
             threading.Thread(target=handle_messages, args=(client_sock,), daemon=True).start()
-
+            print(f"Connected to peer at {peer_ip}:{peer_port}")
         except Exception as e:
             print(f"Failed to connect to DHT peer: {e}")
             exit(1)
 
-        # Step 2: Start SERVER to accept new peers
+        # This solely listens for new peers
         server_sock = socket(AF_INET, SOCK_STREAM)
         server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        server_sock.bind(('', 8008))  # or use a different port if needed
+        server_sock.bind(('', my_port))
         server_sock.listen(2)
-        print("Now listening on port 8008 for new peers...")
-
+        print(f"Now listening on port {my_port} for new peers...")
         threading.Thread(target=accept_loop, daemon=True).start()
 
         try:
             while True:
-                sleep(1)
+                handle_input()
         except KeyboardInterrupt:
-            print("\nKeyboard interrupt received. Shutting down.")
+            print("\nShutting down.")
             server_sock.close()
+
 
 
     else:
         print("Usage:")
-        print("  python file.py              # Start new DHT server")
-        print("  python file.py <IP> <PORT>  # Join existing DHT at IP:PORT")
-
+        print("  python file.py to start a new DHT")
+        print("  python file.py <IP> <PORT to connect to an existing one>")
