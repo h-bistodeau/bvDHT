@@ -1,475 +1,641 @@
-import hashlib
+import socket
 from sys import argv
-from socket import *
+from typing import *
 import threading
-from time import sleep
+import hashlib
 
-# Application is launched through argv. Lack of arguments indicates this will be the server. If there are arguments, then we are
-# connecting to a peer.
+FingerTable = {
+    "self": None, "prev": None, "next": None, "finger1": None, "finger2": None, "finger3": None, "finger4": None
+}
 
-# The all-powerful hash table for this project.
-Valid_commands = ["LOCATE", "CONNECT", "DISCONNECT", "CONTAINS", "GET", "INSERT", "REMOVE", "UPDATE_PREV"]
-running = True
+# just a dictionary
 hashTable = {}
-fingertable = {}
 
+selfPort = 54321
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(('', selfPort))
+sock.listen(5)
+maxHash = 2 ** 160 - 1
 
-# local functions
-
-# determine if we have the key to begin with.chatgpt
-def local_locate(key):
-    if key in hashTable.keys():
-        return '1'
-    return '0'
-
-
-# determine if we have ownership of the space the key is in.
-# run through our fingers. get the closest one and return it.
-def determine_ownership(key_hash):
-    if local_locate(key_hash) == '1':
-        return fingertable["self"]  # I own it
-
-    key = int(key_hash)
-
-    # Check if key is before first finger (wraparound case)
-    if key <= getHashIndex(fingertable["finger1"]):
-        return fingertable["finger1"]
-
-    # Step through fingers to find closest hop
-    for i in range(1, 4):
-        f1 = getHashIndex(fingertable[f"finger{i}"])
-        f2 = getHashIndex(fingertable[f"finger{i + 1}"])
-        if f1 < key <= f2:
-            return fingertable[f"finger{i + 1}"]
-
-    # If no match, fall back to successor
-    return fingertable["next"]
-
-
-# Don't need a class for the finger table, just a dictionary. Key is whatever it is, value should be the peer address.
-
-# ------------------- Finger table functionality----------------------
-def fingerTableSetup(self, startup=True):
-    table = {}
-    if startup:
-        for i in range(1, 5):
-            table[f"finger{i}"] = self
-        table["next"] = self
-        table["prev"] = self
-    else:
-        for i in range(1, 5):
-            # this will have to iterate through who's in the data space but can start as none
-            table[f"finger{i}"] = ("None")
-        table["next"] = None
-        table["prev"] = None
-    table["self"] = self
-
-    return table
-
-
-def updateFingerTable(self):
-    pass
-
-
-def send_peerInfo():
-    pass
-
-
-def receive_peerInfo():
-    pass
-
-
-# --------------------Helper Functions-----------------------
-# Returns an integer index into the hash-space for a node Address
-#  - addr is of the form ("ipAddress or hostname", portNumber)
-#    where the first item is a string and the second is an integer
-def getHashIndex(addr):
-    b_addrStr = ("%s:%d" % addr).encode()
-    return int.from_bytes(hashlib.sha1(b_addrStr).digest(), byteorder="big")
-
-
-def getLine(conn):
+# ----------------------Helper Functions--------------------------
+def get_line(conn: socket):
     msg = b''
     while True:
         ch = conn.recv(1)
         msg += ch
         if ch == b'\n' or len(ch) == 0:
             break
-    return msg.decode()
+    return msg.decode().strip()
 
 
-def accept_loop():
-    while True:
-        conn, addr = server_sock.accept()
-        print(f"Accepted connection from {addr}")
-        threading.Thread(target=handle_messages, args=(conn,), daemon=True).start()
-
-
-# --------------------------Actual Command Functionality-------------------------
-def get(conn, recv, key=None):
-    if recv == True:
-        key = getLine(conn)
-        # acknowledge ownership of the hashed space
-        if key in hashTable.keys():
-            conn.send((f"1\n").encode())
-            value = hashTable[key]
-            length = len[value]
-            conn.send((f"{length}\n").encode())
-            conn.send((f"{hashTable[key]}\n").encode())
-        else:
-            conn.send((f"0\n").encode())
-    else:
-        conn.send(("GET\n").encode())
-        conn.send((f"{key}\n").encode())
-        ack = getLine(conn)
-        if ack == "0":
-            return "NULL"
-        length = int(getLine(conn))
-        data = getLine(conn)
-        return data
-
-
-def locate(conn, recv, key=None):
-    #not quite correct but close
-    if recv == True:
-        key = getLine(conn)
-        # change this to iterate through the fingers with their keys
-        valid_fingers = ['finger1', 'finger2', 'finger3', 'finger4']
-        for finger in valid_fingers:
-            f_addr = fingertable[finger]
-            addr_found = locate(f_addr, True, key)
-            if addr_found:
-                conn.send((str(addr_found) + "\n").encode())
-                return
-    else:
-        conn.send(("LOCATE\n").encode())
-        conn.send((f'{key}\n').encode())
-        address = getLine(conn)
-        return address
-
-def contains(conn, recv, key=None):
-    if recv == True:
-        key = getLine(conn)
-        # if you own the space or that key ack(1) if not ack(0)
-        if key in hashTable.keys():
-            conn.send((f"1\n").encode())
-
-            # if you have entry ack(1) if not ack(0)
-            if hashTable[key] is not None:
-                conn.send((f"1\n").encode())
-            else:
-                conn.send((f"0\n").encode())
-        # if its not even in the space send both negative acknowledgments
-        else:
-            conn.send((f"0\n").encode())
-            conn.send((f"0\n").encode())
-    else:
-        conn.send(("CONTAINS\n"))
-        conn.send((f"{key}\n").encode())
-        ack = getLine(conn)
-        if ack == "0":
-            return False
-        ack = getLine(conn)
-        if ack == "0":
-            return False
-        return True
-
-
-def insert(conn, recv, key=None):
-    if recv == True:
-        key = getLine(conn)
-        # ack if the key is owned by you
-        if key in hashTable.keys():
-            conn.send((f"1\n").encode())
-            try:
-                # try to recieve all the proper data to insert and acknowledge
-                len_key = int(getLine(conn))
-                key = getLine(conn)
-                data = conn.recv(len_key.decode())
-                hashTable[key] = data
-                conn.send((f"1\n").encode())
-            except Exception as e:
-                print(f"there was an error running insert: {e}")
-                conn.send((f"0\n").encode())
-        else:
-            conn.send((f"0\n").encode())
-    else:
-        conn.send(("INSERT\n").encode())
-        conn.send((f"{key}\n").encode())
-        ack = getLine(conn)
-        if ack == "0":
-            return False
-        conn.send((f"{len(key)}\n").encode())
-        conn.send((f"{key}\n").encode())
-        conn.send((f"{hashTable[key]}\n").encode())
-        ack = getLine(conn)
-        if ack == "0":
-            return False
-        return True
-
-
-def remove(conn, recv, key=None):
-    if recv == True:
-        key = getLine(conn)
-        # if the key is within our table (we own it) thn remove it
-        if key in hashTable:
-            hashTable.pop(key)
-            conn.send((f"1\n").encode())
-        else:
-            print("not our owned space so we couldn't remove it")
-            conn.send((f"0\n").encode())
-    else:
-        conn.send(("REMOVE\n"))
-        conn.send((f"{key}\n").encode())
-        ack = getLine(conn)
-        if ack == "0":
-            return False
-        return True
-
-
-def _connect(peer, recv, finger_table, address_key = None):
-    if recv == True:
-        address_key = getLine(peer)
-        peer.send(("1\n").encode())
-        # get the number of entries and send it to the peer
-        num_entries = len(hashTable)
-        peer.send((f"{num_entries}\n").encode())
-        # for everything in the hashtable send the key and its corresponding value
-        for key, value in hashTable.items():
-            peer.send((f"{key}\n").encode())
-            peer.send((f"{value}\n").encode())
-        # give the peer our next
-        peer.send((f"{finger_table['next']}\n").encode())
-        # set the new buddy equal to our previous
-        new_peer = getLine(peer)
-        finger_table['prev'] = new_peer
-
-    else:
-        peer.send(("CONNECT\n").encode())
-        peer.send((f'{address_key}\n').encode())
-        num_entries = int(getLine(peer))
-        while num_entries != 0:
-            key = getLine(peer)
-            value = getLine(peer)
-            hashTable[key] = value
-            num_entries -= 1
-        next_peer = getLine(peer)
-        finger_table["next"] = next_peer
-        peer.send((f"{finger_table['self']}\n").encode())
-
-
-def _disconnect(peer, recv, address_key=None):
-    if recv == True:
-        next_key = getLine(peer)
-        num_entries = int(getLine(peer))
-        while num_entries != 0:
-            key = getLine(peer)
-            length = int(getLine(peer))
-            data = getLine(peer)
-            hashTable[key] = data
-            num_entries -= 1
-
-        updated = update_prev(fingertable["next"], False, fingertable["self"])
-        if updated:
-            peer.send(("1\n").encode())
-        else:
-            peer.send(("0\n").encode())
-        return
-    else:
-        peer.send(("DISCONNECT\n").encode())
-        peer.send((f'{address_key}\n').encode())
-        num_files = len(hashTable)
-        peer.send((f'{num_files}\n').encode())
-        for key in hashTable:
-            peer.send((f"{key}\n").encode())
-            peer.send((f"{len(hashTable[key])}").encode())
-            peer.send((f"{hashTable[key]}\n").encode())
-        ack = getLine(peer)
-        if ack == "0":
-            return False
-        return True
-
-
-def update_prev(conn, recv, self_key):
-    if recv == True:
-        # try to recieve the peer's key and set it within your fingertable
-        try:
-            key = getLine(conn)
-            fingertable["prev"] = key
-            conn.send((f"1\n").encode())
-        except KeyError:
-            conn.send((f"0\n").encode())
-    else:
-        next.send(("UPDATE_PREV\n").encode())
-        next.send((f"{self_key}\n").encode())
-        ack = getLine(next)
-        if ack == '0':
-            return False
-        return True
-
-
-# One of the main functionality pieces, it takes in a string and runs the corresponding function to whatever command was given
-def handle_messages(socket):
-    global running
-
-    # while we are still connected to the DHT
-    while running:
-        try:
-            # recieve a message/command
-            print("Enter Command: ")
-            str_msg = getLine(socket).strip()
-
-            # disconnect if you haven't recieved one
-            if not str_msg:
-                print("Disconnected")
-                break
-
-            # from the list of available commands call the corresponding function
-            if str_msg in Valid_commands:
-                if str_msg == "LOCATE":
-                    print("recieved locate command...")
-                    locate(socket, True)
-
-                elif str_msg == "CONTAINS":
-                    print("recieved contains command...")
-                    contains(socket, True)
-
-                elif str_msg == "GET":
-                    print("recieved get command...")
-                    get(socket, True)
-
-                elif str_msg == "INSERT":
-                    print("recieved insert command...")
-                    insert(socket, True)
-
-                elif str_msg == "REMOVE":
-                    print("recieved remove command...")
-                    remove(socket, True)
-
-                elif str_msg == "UPDATE_PREV":
-                    print("received update_prev command...")
-                    update_prev(socket, True)
-
-                elif str_msg == "exit":
-                    return
-            else:
-                print("recieved unknown command, or data is being recieved elsewhere")
-
-        except Exception as e:
-            print('Error', e)
-            print("Disconnected")
-            running = False
+def recvall(conn, msgLength):
+    msg = b''
+    while len(msg) < msgLength:
+        retVal = conn.recv(msgLength - len(msg))
+        msg += retVal
+        if len(retVal) == 0:
             break
+    return msg
+
+def get_HashIndex(addr):
+    b_addrStr = ("%s:%d" % addr).encode()
+    return int.from_bytes(hashlib.sha1(b_addrStr).digest(), byteorder="big")
 
 
-def handle_input():
-    user_in = input("Enter Command > ").strip().upper()
-    words = user_in.split(" ",1)
-    command = words[0]
-    if command not in Valid_commands:
-        print("invalid command was entered please enter a correct one")
-        print("Valid Commands are: DISCONNECT, LOCATE, INSERT, REMOVE, UPDATE_PREV")
-        return
-    if command == "DISCONNECT":
-        print("Received disconnect command")
-        ip, port = fingertable["prev"].decode().strip().split(":")
-        with socket(AF_INET, SOCK_STREAM) as conn:
-            conn.connect(ip, port)
-            _disconnect(conn, False, fingertable["self"])
-            return
-    elif command == "LOCATE":
-        if len(words) == 2:
-            print("Received Locate command")
-            locate(socket, False, words[1]) # calls locate function on the sending side with the key givec
-        else:
-            print('invalid syntax. correct syntax is LOCATE <key>')
-            return
-    elif command == "INSERT":
-        if len(words) == 2:
-            print("Received Insert command")
-            insert(socket, False, words[1])
-        else:
-            print('invalid syntax. correct syntax is INSERT <key>')
-            return
-    elif command == "REMOVE":
-        if len(words) == 2:
-            print("Received Remove command")
-            remove(socket, False, words[1])
-        else:
-            print('invalid syntax. correct syntax is REMOVE <key>')
-    elif command == "CONTAINS":
-        if len(words) == 2:
-            print("Received Contains command")
-            contains(socket, False, words[1])
-        else:
-            print('invalid syntax. correct syntax is CONTAINS <key>')
-    elif command == "GET":
-        if len(words) == 2:
-            print("Received Get command")
-            get(socket, False, words[1])
-        else:
-            print('invalid syntax. correct syntax is GET <key>')
-    elif command == "UPDATE_PREV":
-        if len(words) == 2:
-            print("Received Update Prev command")
-            update_prev(socket, False, words[1])
-        else:
-            print('invalid syntax. correct syntax is UPDATE_PREV <self_key>')
+def getHashKey(data: str):
+    return int.from_bytes(hashlib.sha1(data.encode()).digest(), byteorder="big")
 
+def get_LocalIP():
+    ''' my old code that didn't work had some help from stack overflow & GfG
+    machine_name = socket.gethostname()
+    local_IP = socket.gethostbyname(machine_name)
+    return local_IP  '''
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect(("8.8.8.8", 80))  # Google DNS doesn't need to be reachable
+        return s.getsockname()[0]
 
-if __name__ == "__main__":
-    # we are starting a brand new DHT since there are no arguments for the peer IP/Port
-    if len(argv) == 1:
-        server_sock = socket(AF_INET, SOCK_STREAM)
-        server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        server_sock.bind(('', 8008))
-        server_sock.listen(5)
-        fingertable = fingertable(startup=True)
-        print("Now listening on port 8008 for new peers...")
+def print_help():
+    print("valid commands:")
+    print("insert <key> <value>")
+    print("get <key>")
+    print("remove <key>")
+    print("contains <key>")
+    print("disconnect")
+    print("help")
 
-        threading.Thread(target=accept_loop, daemon=True).start()
+#actuall use the functions to get our own address
+self_IP = get_LocalIP()
+self_Conn = (self_IP, selfPort)
+self_Location = get_HashIndex(self_Conn)
 
-        try:
-            while running:
-                handle_input()
-        except KeyboardInterrupt:
-            print("\nShutting down.")
-            server_sock.close()
-
-    elif len(argv) >= 3:
-        peer_ip = argv[1]
-        peer_port = int(argv[2])
-        my_port = int(argv[3]) if len(argv) > 3 else 8008
-
-        try:
-            client_sock = socket(AF_INET, SOCK_STREAM)
-            client_sock.connect((peer_ip, peer_port))
-            fingerTableSetup(startup=False)
-            client_sock.send(("Connected to you\n").encode())
-            threading.Thread(target=handle_messages, args=(client_sock,), daemon=True).start()
-            print(f"Connected to peer at {peer_ip}:{peer_port}")
-        except Exception as e:
-            print(f"Failed to connect to DHT peer: {e}")
-            exit(1)
-
-        # This solely listens for new peers
-        server_sock = socket(AF_INET, SOCK_STREAM)
-        server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        server_sock.bind(('', my_port))
-        server_sock.listen(2)
-        print(f"Now listening on port {my_port} for new peers...")
-        threading.Thread(target=accept_loop, daemon=True).start()
-
-        try:
-            while True:
-                handle_input()
-        except KeyboardInterrupt:
-            print("\nShutting down.")
-            server_sock.close()
+#---------------------------finger table logic------------------------------
+def findClosest(hashedKey: int):
+    closest = FingerTable["self"]
+    for key, value in FingerTable.items():
+        if not value:
+            continue
+        # go through all the if statements trying to find the closest key without going past
+        if hashedKey >= value[1] and hashedKey >= closest[1]:
+            closest = value if value[1] > closest[1] else closest
+        elif hashedKey >= value[1] and hashedKey < closest[1]:
+            closest = value
+        elif hashedKey < value[1] and hashedKey < closest[1]:
+            if (maxHash - value[1]) + hashedKey < (maxHash - closest[1]) + hashedKey:
+                closest = value
+    return closest[0]
 
 
 
+# this should just be a boolean function reutrning true or false (is this person the owner of this space? isOwner? get it)
+def isOwner(hashedKey: int):
+    selfFinger = FingerTable["self"]
+    nextFinger = FingerTable["next"]
+
+    # if we are the only one in the fingertable then return true
+    if nextFinger is None:
+        return True
+
+    # Check if hashkey is after (greater then self)
+    if selfFinger[1] <= hashedKey < nextFinger[1]:
+        return True
+
+    # If we are the last node (i.e., the range wraps around)
+    if selfFinger[1] > nextFinger[1] and (hashedKey >= selfFinger[1] or hashedKey < nextFinger[1]):
+        return True
+
+    return False
+
+
+def update_prev_finger(peer_Addr):
+    # boolean function that returns true upon updating the fingerTable[prev]
+    FingerTable["prev"] = (peer_Addr, get_HashIndex(peer_Addr))
+    return True
+
+def updateFingers():
+    for i in range(4):
+        hashedKey = int(self_Location + (maxHash / 5) * (i + 1))
+        if hashedKey > maxHash:
+            hashedKey -= maxHash
+        peer = locate(hashedKey)
+        location_p = get_HashIndex(peer)
+        FingerTable[f"finger{i}"] = (peer, location_p)
+
+# -------------------- Sending commands Functionality ------------------------
+
+def insert(key, data):
+    print('inside insert')
+    hashKey = getHashKey(key)
+    ack = None
+    while ack != '1':
+        # Get peer we think owns data
+        peer = locate(hashKey)
+        print(f"peer: {peer}")
+
+        # Connect to peer
+        peerConn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        peerConn.connect(peer)
+
+        # Send the peer the command and the key
+        peerConn.sendall('INSERT\n'.encode())
+        peerConn.sendall(f'{hashKey}\n'.encode())
+
+        # Get acknowledgement of ownership of space
+        ack = get_line(peerConn)
+        if ack != '1':
+            peerConn.close()
+
+    # Send length of data followed by data
+    print('outside while loop')
+    peerConn.sendall((str(len(data)) + '\n').encode())
+    peerConn.sendall(data.encode())
+
+    # ack of the successful insert (hopefully of course)
+    ack = get_line(peerConn)
+    peerConn.close()
+    if ack != '1':
+        print("Error: issue inserting data")
+        return False
+    return True
+
+def locate(data, *args):
+    # Get the hashed key of data (if its a int it's fine
+    if isinstance(data, int):
+        hashedKey = data
     else:
-        print("Usage:")
-        print("  python file.py to start a new DHT")
-        print("  python file.py <IP> <PORT to connect to an existing one>")
+        #if data is a string then call gethashkey to hash it
+        hashedKey = getHashKey(data)
+
+    # if we own the data no need to look through the finger table
+    if isOwner(hashedKey):
+        return self_Conn
+
+    # Get closest finger
+    if len(args) == 1:
+        closest = args[0]
+    else:
+        closest = findClosest(hashedKey)
+
+    # Connect to the peer we just found
+    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    conn.connect(closest)
+    conn.sendall("LOCATE\n".encode())
+    conn.sendall((str(hashedKey) + '\n').encode())
+
+    # Receive Peer Address
+    ip, port = get_line(conn).split(':')
+    port = int(port)
+    conn.close()
+
+    # if you just asked the person who is next closest
+    if closest[0] == ip and closest[1] == port:
+        return (ip, port)
+    # Otherwise try again with the new connection info
+    else:
+        return locate((ip, port), hashedKey)
+
+def remove(key):
+    hashKey = getHashKey(key)
+    ack = None
+    while ack != '1':
+        # Get peer we think owns data
+        peer = locate(hashKey)
+
+        # Connect to peer
+        peerConn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        peerConn.connect(peer)
+        peerConn.sendall('REMOVE\n'.encode())
+        peerConn.sendall((f"{hashKey}\n").encode())
+
+        ack = get_line(peerConn)
+        if ack != '1':
+            peerConn.close()
+
+    # Get ack of successful removal
+    ack = get_line(peerConn)
+    peerConn.close()
+    if ack == '1':
+        print("Successfully removed!")
+        return True
+    else:
+        print(f"Error removing {key}")
+        return False
+
+def get(key):
+    hashedKey = getHashKey(key)
+    ack = None
+    while ack != '1':
+        # Get peer we think owns data
+        peer = locate(hashedKey)
+
+        # Connect to peer
+        peerConn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        peerConn.connect(peer)
+
+        # Send the connect protocol information
+        peerConn.sendall(b'GET\n')
+        peerConn.sendall((str(hashedKey) + '\n').encode())
+
+        # Get acknowledgement of ownership of space
+        ack = get_line(peerConn)
+        if ack != '1':
+            peerConn.close()
+
+    # Get length of data and data of that length
+    dataSize = int(get_line(peerConn))
+    if dataSize == 0:
+        print("No data found...")
+        data = ''
+    else:
+        data = recvall(peerConn, dataSize).decode()
+        print(data)
+    peerConn.close()
+    return data
+
+def connect(peerIP, peerPort):
+    # place ourself in the finger table
+    FingerTable["self"] = (self_Conn, self_Location)
+
+    self_address = "%s:%d" % self_Conn
+    ack = None
+    while ack == '0':
+        # find the closest peer to you to place yourself in the ring so to speak
+        peer = locate(self_address, (peerIP, peerPort))
+
+        # connect to the decided peer and send our location (and the command)
+        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        conn.connect(peer)
+        conn.sendall('CONNECT\n'.encode())
+        conn.sendall(f"{self_Location}\n".encode())
+
+        # acknowledge for the space owner
+        ack = get_line(conn)
+        if ack != '1':
+            conn.close()
+
+    # Receive data
+    numEntries = int(get_line(conn))
+    for i in range(numEntries):
+        key = int(get_line(conn))
+        len_item = int(get_line(conn))
+        item = recvall(conn, len_item).decode()
+        hashTable[key] = item
+
+    # Get address of the next peer
+    ip, port = get_line(conn).split(':')
+    port = int(port)
+    FingerTable["next"] = ((ip, port), get_HashIndex((ip, port)))
+    conn.sendall((self_address + "\n").encode())
+    conn.close()
+
+    #handle updating all our fingers
+    update_prev_finger(peer)
+    update_prev((ip, port))
+    updateFingers()
+
+def disconnect():
+    print("Disconnecting from DHT...")
+
+    # Transfer data to your prev person in the finger table
+    prev = FingerTable["prev"]
+    nextPeer = FingerTable["next"]
+
+    # If you are lonely and the only person currently in the DHT
+    if prev[1] == FingerTable["self"][1]:
+        return
+
+    ack = None
+    while ack == '0': # while you still have a negative acknowledgment
+        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        conn.connect(prev[0])
+        conn.sendall('DISCONNECT\n'.encode())
+
+        # Send next finger address as {IP}:{PORT}
+        conn.sendall((f"{nextPeer[0][0]}:{nextPeer[0][1]}\n").encode())
+
+        # Send the length of our hash table, how many entries we have
+        hashTable_len = len(hashTable)
+        conn.sendall(f'{hashTable_len}\n'.encode())
+
+        # Send hashed key, length of the data, and the data itself
+        for key, data in hashTable.items():
+            conn.sendall(f'{key}\n'.encode())
+            data_len = len(data) # get the length of the data
+            conn.sendall(f'{data_len}\n'.encode())
+            conn.sendall(data.encode())
+
+        # take in th eacknowledgment of a successful transfer
+        ack = get_line(conn)
+        conn.close() # we just reopen the socket et the beginneing of the loop anyway
+    update_prev(nextPeer[0], prev[0])
+    print("Disconnect command was successful YIPPEE")
+
+def contains(key):
+    hashKey = getHashKey(key)
+    ack = None # default initialization
+
+    while ack == '0': # while you have a negative acknowledgement try and locate/connect to peers
+        # Get peer we think owns data
+        peer = locate(hashKey)
+
+        # Connect to the peer
+        peerConn = socket(socket.AF_INET, socket.SOCK_STREAM)
+        peerConn.connect(peer)
+        peerConn.sendall('CONTAINS\n'.encod())
+        peerConn.sendall((f"{hashKey}\n").encode())
+
+        # Get acknowledgement of ownership of space
+        ack = get_line(peerConn)
+        if ack != '1':
+            peerConn.close()
+
+    ack = get_line(peerConn) # acknowledgement if the data actually got there
+    peerConn.close()
+    if ack == '0':
+        print("Fales")
+        return False
+    else:
+
+        return True
+
+def update_prev(nextAddr, prevAddr = self_Conn): # prevAddr is default to our own connection (self conn is our IP and port)
+    try:
+        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        conn.connect(nextAddr)
+
+        conn.sendall("UPDATE_PREV\n".encode())
+        conn.sendall((f"{prevAddr[0]}:{prevAddr[1]}\n").encode())
+
+        ack = get_line(conn)
+        if ack == '0':
+            print("Update Prev command was unsuccessful")
+            conn.close()
+            return False
+        else:
+            print("Update Prev command was successful, can i get 5 big booms? (thats good)")
+            conn.close()
+            return True
+    except Exception as e:
+        print(f"Error: {e}")
+        return False
+    except KeyboardInterrupt:
+        print("Exiting update_prev function hold on a minute plz")
+
+#------------------------- Recieving Funcitonality ---------------------------------
+
+def locate_recv(conn):
+    # grab the hash key
+    hashKey = int(get_line(conn))
+
+    #Get closest peer
+    closest = findClosest(hashKey)
+    closest_string = f"{closest[0]}:{closest[1]}\n"
+
+    # actually send the thing
+    conn.sendall(closest_string.encode())
+
+def get_recv(conn):
+    hashKey = int(get_line(conn))
+    # Send ack of ownership of space
+    if isOwner(hashKey) == False:
+        conn.sendall(b'0\n')
+        conn.close()
+        return
+    conn.sendall(b'1\n')
+
+    # Send len of data followed by data. 0 if not found
+    if hashKey in hashTable:
+        conn.sendall((str(len(hashTable[hashKey])) + '\n').encode())
+        conn.sendall(hashTable[hashKey].encode())
+    else:
+        conn.sendall('0\n'.encode())
+    conn.close()
+
+def insert_recv(conn):
+    hashKey = int(get_line(conn))
+    # make sure we arent the owner of the space
+    if isOwner(hashKey) == False:
+        conn.sendall('0\n'.encode())
+        conn.close()
+        return
+    conn.sendall('1\n'.encode())
+
+    # Grab data
+    len_data = int(get_line(conn))
+    data = recvall(conn, len_data)
+    data = data.decode()
+
+    # put the data in our hashTable and tell our peer everythings fine
+    hashTable[hashKey] = data
+    conn.sendall('1\n'.encode())
+    conn.close()
+
+def remove_recv(conn):
+    hashKey = int(get_line(conn))
+
+    # Send ack of ownership of space
+    if not isOwner(hashKey):
+        conn.sendall('0\n'.encode())
+        conn.close()
+        return
+    conn.sendall('1\n'.encode())
+    # Remove data and send 1 if successful, 0 if not
+    try:
+        if hashKey in hashTable:
+            hashTable.pop(hashKey)
+        conn.sendall('1\n'.encode())
+    except Exception as e:
+        print(f"Error: {e}")
+        conn.sendall(b'0\n')
+    except KeyboardInterrupt:
+        print("stopped inside of remove_recv()")
+    finally:
+        conn.close()
+
+def contains_recv(conn):
+    hashKey = int(get_line(conn))
+    # if isOwner is false close the connection and send the negative acknowledgment
+    if isOwner(hashKey) == False:
+        conn.sendall('0\n'.encode())
+        conn.close()
+        return
+    conn.sendall('1\n'.encode())
+
+    # send negative acknowledgement if the key isn't in your hashTable
+    if hashKey not in hashTable:
+        conn.sendall('0\n'.encode())
+    else:
+        conn.sendall('1\n'.encode())
+    conn.close()
+
+
+def connect_recv(conn):
+    try:
+        hashKey = int(get_line(conn))
+
+        if isOwner(hashKey) == True: # if you have reached the owner of the hashkey
+            conn.sendall('1\n'.encode())
+
+            numfiles = len(hashTable)
+            conn.sendall(f"{numfiles}\n".encode())
+            # for every key value pair in our hashtable send the key, len(value), and value over
+            for key, value in hashTable:
+                len_value = len(value)
+                conn.sendall(f"{key}\n".encode())
+                conn.sendall(f"{len_value}\n".encode())
+                conn.sendall(value.encode())
+
+            if FingerTable["next"]:
+                nextConn = FingerTable["next"][0]
+                conn.sendall((f"{nextConn[0]}:{nextConn[1]}\n").encode())
+            else:
+                nextConn = FingerTable["self"][0]
+                conn.sendall((f"{nextConn[0]}:{nextConn[1]}\n").encode())
+
+            ip, port = get_line(conn).split(':')
+            port = int(port)
+            FingerTable["next"] = ((ip, port), get_HashIndex((ip, port)))
+        else:
+            conn.sendall(b'0\n')
+            conn.close()
+            return
+    except Exception as e:
+        print(f"Error found at connect_recv: {e}")
+    except KeyboardInterrupt:
+        print("stopped inside of connect_recv()")
+
+def disconnect_recv(conn):
+    # Get ip and port of new next Finger
+    try:
+        ip, port = get_line(conn).split(':')
+        port = int(port)
+
+        # Update Fingers
+        FingerTable["next"] = ((ip, port), get_HashIndex((ip, port)))
+
+        # Get num entries
+        n = int(get_line(conn))
+
+        # for the number of entries get the key, len, and data
+        for i in range(n):
+            key = int(get_line(conn))
+            len_Data = int(get_line(conn))
+            data = recvall(conn, len_Data).decode()
+            hashTable[key] = data
+
+        # Send ACK of successful transfer
+        conn.sendall(b'1\n')
+    except Exception as e:
+        print(e)
+
+def update_prev_recv(conn):
+    try:
+        ip, port = get_line(conn).split(':')
+        update = update_prev_finger((ip, int(port)))
+
+        if update:
+            conn.sendall(b'1\n')
+        else:
+            conn.sendall(b'0\n')
+    except Exception as e:
+        print(f"Error: {e}")
+        conn.sendall(b'0\n')
+
+def handle_recieving(conn, addr):
+    try:
+        command = get_line(conn)
+
+        #this is the
+        if command == "CONNECT":
+            print(f"recieved command: {command} from {addr}")
+            connect_recv(conn)
+        elif command == "CONTAINS":
+            print(f"recieved command: {command} from {addr}")
+            contains_recv(conn)
+        elif command == "LOCATE":
+            print(f"recieved command: {command} from {addr}")
+            locate_recv(conn)
+        elif command == "GET":
+            print(f"recieved command: {command} from {addr}")
+            get_recv(conn)
+        elif command == "INSERT":
+            print(f"recieved command: {command} from {addr}")
+            insert_recv(conn)
+        elif command == "REMOVE":
+            print(f"recieved command: {command} from {addr}")
+            remove_recv(conn)
+        elif command == "DISCONNECT":
+            print(f"recieved command: {command} from {addr}")
+            disconnect_recv(conn)
+        elif command == "UPDATE_PREV":
+            print(f"recieved command: {command} from {addr}")
+            update_prev_recv(conn)
+
+    except Exception as e:
+        print(f"Error within handling_recv(): {e}")
+    except KeyboardInterrupt:
+        print("stopped inside of handle_recieving()")
+    finally:
+        conn.close()
+
+def start_FingerTable():
+    print("Startign up the hashTable, setting the fingerTable[self] and [next] to self")
+
+    FingerTable["self"] = (self_Conn, self_Location)
+    FingerTable["next"] = (self_Conn, self_Location)
+
+def accept_loop(): # legit only creates a thread theres no other purpose
+    print('in accept loop')
+    while True:
+        threading.Thread(target=handle_recieving, args=(*sock.accept(),), daemon=True).start()
+
+print("Starting up the Hash Table")
+print(f"Your IP Address: {self_IP} Your Port: {selfPort}")
+
+try:
+    if len(argv) == 3:
+        peerIP = argv[1]
+        peerPort = int(argv[2])
+        connect(peerIP, peerPort)
+    elif len(argv) == 1:
+        start_FingerTable()
+        print('here in elif statement')
+    else:
+        print("Wrong number of arguments")
+        print("correct syntax: Python3 bv-DHT.py <ip> <port> or python3 bv-DHT.py if you want to start the DHT")
+    threading.Thread(target=accept_loop, args=(), daemon=True).start()
+
+    print("get input maybe")
+    while True:
+        #get input from the user
+        msg = input('Enter a Command>')
+        if " " in msg:
+            command, data = msg.split(' ', 1)
+        else:
+            command = msg
+            data = ''
+
+        #start the menu to send out commands to your peers
+        if command == "get":
+            get(data)
+        elif command == "locate":
+            locate(data)
+        elif command == "insert":
+            key, value = data.split(' ', 1) #split at the first space only
+            print("inside of the insert menu elif")
+            insert(key, value)
+        elif command == "remove":
+            remove(data)
+        elif command == "contains":
+            contains(data)
+        elif command == "disconnect":
+            disconnect()
+            exit(0)
+        elif command == "help":
+            print_help()
+        else:
+            print(f"soooo {command} is not an actual command")
+            print('use the <help> command if you are stuck (i know i forget all of them -the programmers')
+except KeyboardInterrupt:
+    print("\n trying to shut the thing down")
+    sock.close()
